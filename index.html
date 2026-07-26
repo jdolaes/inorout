@@ -175,6 +175,19 @@
   .modal-sheet{background:var(--bg);width:100%;max-width:440px;border-radius:20px 20px 0 0;padding:20px 20px 28px;max-height:85vh;overflow-y:auto;}
   .modal-sheet h3{font-size:18px;margin-bottom:14px;}
 
+  /* Toast confirmation */
+  .toast-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(18,36,32,0.4);z-index:200;opacity:0;pointer-events:none;transition:opacity .2s ease;}
+  .toast-overlay.show{opacity:1;pointer-events:auto;}
+  .toast-card{background:#fff;border-radius:22px;padding:30px 30px 26px;text-align:center;width:78%;max-width:280px;box-shadow:0 24px 60px -14px rgba(0,0,0,0.35);transform:scale(0.82);transition:transform .28s cubic-bezier(.34,1.56,.64,1);}
+  .toast-overlay.show .toast-card{transform:scale(1);}
+  .toast-icon{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;}
+  .toast-icon.in{background:var(--gold-tint);}
+  .toast-icon.out{background:var(--rust-tint);}
+  .toast-msg{font-family:'Fraunces',serif;font-weight:700;font-size:19px;margin-bottom:6px;letter-spacing:-0.01em;}
+  .toast-msg.in{color:var(--gold);}
+  .toast-msg.out{color:var(--rust);}
+  .toast-amt{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:15px;color:var(--ink-soft);}
+
   /* Auth screen */
   .auth-wrap{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:32px 28px;}
   .auth-logo{display:flex;justify-content:center;margin-bottom:18px;}
@@ -341,6 +354,14 @@
     </div>
   </div>
 
+</div>
+
+<div class="toast-overlay" id="toastOverlay">
+  <div class="toast-card">
+    <div class="toast-icon" id="toastIcon"></div>
+    <div class="toast-msg" id="toastMsg"></div>
+    <div class="toast-amt" id="toastAmt"></div>
+  </div>
 </div>
 
 <script>
@@ -526,8 +547,28 @@ async function submitTx(type){
   if(error){ console.error(error); notesEl.style.borderColor = 'var(--rust)'; return; }
   clearForm(type);
   await loadData();
-  goTo('home');
+  showToast(type, amount);
+  setTimeout(() => { hideToast(); goTo('home'); }, 1700);
 }
+
+const IN_MESSAGES = ["Cha-ching!","Money's in!","Ka-ching, baby!","Nice inflow!","Look at that!","Income logged!"];
+const OUT_MESSAGES = ["Oops! Money out.","There it goes…","Well, that happened.","Expense logged.","Bye bye, pesos.","Out it goes!"];
+
+function showToast(type, amount){
+  const msgs = type === 'in' ? IN_MESSAGES : OUT_MESSAGES;
+  const msg = msgs[Math.floor(Math.random() * msgs.length)];
+  const msgEl = document.getElementById('toastMsg');
+  msgEl.textContent = msg;
+  msgEl.className = 'toast-msg ' + type;
+  document.getElementById('toastAmt').textContent = (type === 'in' ? '+' : '-') + fmtPHP(amount);
+  const iconEl = document.getElementById('toastIcon');
+  iconEl.className = 'toast-icon ' + type;
+  iconEl.innerHTML = type === 'in'
+    ? '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>'
+    : '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--rust)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+  document.getElementById('toastOverlay').classList.add('show');
+}
+function hideToast(){ document.getElementById('toastOverlay').classList.remove('show'); }
 
 function clearForm(type){
   if(type==='in'){
@@ -814,6 +855,8 @@ async function enterApp(user){
   renderLogo();
   initPickers();
   await loadData();
+  const action = new URLSearchParams(window.location.search).get('action');
+  if(action === 'in' || action === 'out'){ goTo(action); }
 }
 
 async function initAuthGate(){
