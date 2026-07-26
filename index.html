@@ -321,7 +321,13 @@
 
   <div class="view" id="view-bills">
     <div class="form-header"><div class="back-btn" onclick="goTo('home')">←</div><h2>Bills</h2></div>
-    <div style="padding:0 4px;" id="billsList"></div>
+    <div style="padding:0 4px;">
+      <div class="stat-grid" id="debtOverview" style="display:none;">
+        <div class="stat-card rust"><div class="s-label">Total Outstanding</div><div class="s-val" id="debtOutstanding">₱0</div></div>
+        <div class="stat-card primary"><div class="s-label">Due Per Cycle</div><div class="s-val" id="debtDuePerCycle">₱0</div></div>
+      </div>
+      <div id="billsList"></div>
+    </div>
     <div class="fab" onclick="openBillModal()">+</div>
   </div>
 
@@ -349,6 +355,7 @@
       <div class="field"><label>Payment Mode</label><div class="chip-grid" id="billPaymentPicker"></div></div>
       <div class="field" id="billPaymentOther" style="display:none;"><label>Specify wallet</label><input type="text" id="billPaymentOtherInput" placeholder="Wallet name"></div>
       <div class="field"><label>Maturity Date (if applicable)</label><input type="date" id="billMaturity"></div>
+      <div class="field amount-field"><label>Outstanding Balance (optional — for loans/credit cards)</label><span class="php-prefix">₱</span><input type="number" id="billOutstanding" placeholder="Total still owed, if applicable"></div>
       <div class="field"><label>Notes</label><textarea id="billNotes" placeholder="e.g. Account name, autopay reminder"></textarea></div>
       <button class="submit-btn neutral" onclick="submitBill()">Save Bill</button>
       <div style="text-align:center;margin-top:10px;"><span style="font-size:12px;color:var(--muted);cursor:pointer;" onclick="closeBillModal()">Cancel</span></div>
@@ -490,7 +497,7 @@ function mapTxFromDB(row){
   };
 }
 function mapBillFromDB(row){
-  return { id: row.id, category: row.category, frequency: row.frequency, due: row.due_day, paymentMode: row.payment_mode, maturity: row.maturity_date, notes: row.notes, amount: Number(row.amount) || 0 };
+  return { id: row.id, category: row.category, frequency: row.frequency, due: row.due_day, paymentMode: row.payment_mode, maturity: row.maturity_date, notes: row.notes, amount: Number(row.amount) || 0, outstanding: row.outstanding_balance !== null ? Number(row.outstanding_balance) : null };
 }
 
 async function loadData(){
@@ -596,6 +603,12 @@ async function deleteTx(id){
 
 function ordinal(n){ const s=['th','st','nd','rd'],v=n%100; return s[(v-20)%10]||s[v]||s[0]; }
 
+function computeWalletBalances(){
+  const wallets = {};
+  DATA.transactions.forEach(t=>{ if(!wallets[t.wallet]) wallets[t.wallet]=0; wallets[t.wallet] += (t.type==='in'?t.amount:-t.amount); });
+  return wallets;
+}
+
 function renderHome(){
   const totalIn = DATA.transactions.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
   const totalOut = DATA.transactions.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
@@ -610,10 +623,12 @@ function renderHome(){
 
   const dueList = document.getElementById('dueSoonList');
   const today = new Date();
+  const walletBalances = computeWalletBalances();
   const upcoming = DATA.bills.map(b => {
     let due = new Date(today.getFullYear(), today.getMonth(), b.due);
     if(due < today) due = new Date(today.getFullYear(), today.getMonth()+1, b.due);
-    return {...b, daysLeft: Math.ceil((due - today) / 86400000)};
+    const walletBal = walletBalances[b.paymentMode] || 0;
+    return {...b, daysLeft: Math.ceil((due - today) / 86400000), shortBy: b.amount - walletBal};
   }).sort((a,b)=>a.daysLeft-b.daysLeft).slice(0,3);
 
   dueList.innerHTML = upcoming.length === 0
@@ -621,7 +636,11 @@ function renderHome(){
     : upcoming.map(b => `
       <div class="mini-row">
         ${categoryBadge(b.category,32)}
-        <div class="r-left"><div class="r-title">${b.category}</div><div class="r-sub">${fmtPHP(b.amount)} · ${b.paymentMode} · every ${b.due}${ordinal(b.due)}</div></div>
+        <div class="r-left">
+          <div class="r-title">${b.category}</div>
+          <div class="r-sub">${fmtPHP(b.amount)} · ${b.paymentMode} · every ${b.due}${ordinal(b.due)}</div>
+          ${b.shortBy > 0 ? `<div class="r-sub" style="color:var(--rust);font-weight:700;">⚠ Short by ${fmtPHP(b.shortBy)} in ${b.paymentMode}</div>` : ''}
+        </div>
         <div class="r-amt" style="color:${b.daysLeft<=3?'var(--rust)':'var(--muted)'}">${b.daysLeft}d</div>
       </div>`).join('');
 
@@ -668,8 +687,7 @@ function renderBoard(){
       </div>`).join('');
   }
 
-  const wallets = {};
-  DATA.transactions.forEach(t=>{ if(!wallets[t.wallet]) wallets[t.wallet]=0; wallets[t.wallet] += (t.type==='in'?t.amount:-t.amount); });
+  const wallets = computeWalletBalances();
   const walletEl = document.getElementById('walletBreakdown');
   const walletEntries = Object.entries(wallets);
   walletEl.innerHTML = walletEntries.length === 0
@@ -743,10 +761,11 @@ async function submitBill(){
   let pay = pickerState.billPayment;
   if(pay === 'Others') pay = document.getElementById('billPaymentOtherInput').value.trim() || 'Others';
   const maturityVal = document.getElementById('billMaturity').value;
+  const outstandingVal = parseFloat(document.getElementById('billOutstanding').value);
   const row = {
     user_id: currentUser.id, category: cat, frequency: document.getElementById('billFrequency').value,
     due_day: dueVal, payment_mode: pay, maturity_date: maturityVal ? maturityVal : null,
-    amount: amountVal, notes: notesEl.value.trim()
+    amount: amountVal, outstanding_balance: outstandingVal > 0 ? outstandingVal : null, notes: notesEl.value.trim()
   };
   const { error } = await sb.from('bills').insert(row);
   if(error){ console.error(error); notesEl.style.borderColor = 'var(--rust)'; return; }
@@ -757,6 +776,7 @@ async function submitBill(){
   document.getElementById('billAmount').value='';
   document.getElementById('billDue').value='';
   document.getElementById('billMaturity').value='';
+  document.getElementById('billOutstanding').value='';
   pickerState.billCategory='Internet'; renderPicker('billCategoryPicker');
   pickerState.billPayment='Cash'; renderPicker('billPaymentPicker');
   await loadData();
@@ -772,11 +792,27 @@ async function deleteBill(id){
 
 function renderBills(){
   const el = document.getElementById('billsList');
+  const overviewEl = document.getElementById('debtOverview');
+
   if(DATA.bills.length === 0){
+    overviewEl.style.display = 'none';
     el.innerHTML = '<div class="empty-state"><div class="e-title">No ongoing bills</div>Tap + to add your first recurring bill.</div>';
     return;
   }
-  el.innerHTML = [...DATA.bills].sort((a,b)=>a.due-b.due).map(b => `
+
+  const withOutstanding = DATA.bills.filter(b => b.outstanding !== null && b.outstanding !== undefined);
+  const totalOutstanding = withOutstanding.reduce((s,b)=>s+b.outstanding,0);
+  const totalPerCycle = DATA.bills.reduce((s,b)=>s+b.amount,0);
+  overviewEl.style.display = 'grid';
+  document.getElementById('debtOutstanding').textContent = withOutstanding.length ? fmtPHP(totalOutstanding) : '—';
+  document.getElementById('debtDuePerCycle').textContent = fmtPHP(totalPerCycle);
+
+  const walletBalances = computeWalletBalances();
+
+  el.innerHTML = [...DATA.bills].sort((a,b)=>a.due-b.due).map(b => {
+    const walletBal = walletBalances[b.paymentMode] || 0;
+    const shortBy = b.amount - walletBal;
+    return `
     <div class="bill-card">
       <div class="bill-top">
         <div class="bill-top-left">${categoryBadge(b.category,36)}<div class="bill-cat">${b.category}</div></div>
@@ -790,9 +826,12 @@ function renderBills(){
         <span class="bill-chip">Due day ${b.due}</span>
         <span class="bill-chip" style="display:flex;align-items:center;gap:5px;padding-left:4px;">${walletBadge(b.paymentMode,16)}${b.paymentMode}</span>
         ${b.maturity ? `<span class="bill-chip">Until ${new Date(b.maturity).toLocaleDateString('en-PH',{month:'short',year:'numeric'})}</span>` : ''}
+        ${b.outstanding !== null && b.outstanding !== undefined ? `<span class="bill-chip" style="background:var(--rust-tint);color:var(--rust);">Owed: ${fmtPHP(b.outstanding)}</span>` : ''}
       </div>
+      ${shortBy > 0 ? `<div class="bill-notes" style="color:var(--rust);font-weight:700;margin-top:8px;">⚠ Short by ${fmtPHP(shortBy)} in ${b.paymentMode} to cover this</div>` : ''}
       ${b.notes ? `<div class="bill-notes">${b.notes}</div>` : ''}
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-PH',{weekday:'short',month:'short',day:'numeric'});
