@@ -338,6 +338,7 @@
       <h3>Add Ongoing Bill</h3>
       <div class="field"><label>Category</label><div class="chip-grid" id="billCategoryPicker"></div></div>
       <div class="field" id="billCategoryOther" style="display:none;"><label>Specify category</label><input type="text" id="billCategoryOtherInput" placeholder="Category name"></div>
+      <div class="field amount-field"><label>Amount</label><span class="php-prefix">₱</span><input type="number" id="billAmount" placeholder="0.00" inputmode="decimal"></div>
       <div class="field">
         <label>Frequency</label>
         <select id="billFrequency" style="width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-size:15px;">
@@ -489,7 +490,7 @@ function mapTxFromDB(row){
   };
 }
 function mapBillFromDB(row){
-  return { id: row.id, category: row.category, frequency: row.frequency, due: row.due_day, paymentMode: row.payment_mode, maturity: row.maturity_date, notes: row.notes };
+  return { id: row.id, category: row.category, frequency: row.frequency, due: row.due_day, paymentMode: row.payment_mode, maturity: row.maturity_date, notes: row.notes, amount: Number(row.amount) || 0 };
 }
 
 async function loadData(){
@@ -620,7 +621,7 @@ function renderHome(){
     : upcoming.map(b => `
       <div class="mini-row">
         ${categoryBadge(b.category,32)}
-        <div class="r-left"><div class="r-title">${b.category}</div><div class="r-sub">${b.paymentMode} · every ${b.due}${ordinal(b.due)}</div></div>
+        <div class="r-left"><div class="r-title">${b.category}</div><div class="r-sub">${fmtPHP(b.amount)} · ${b.paymentMode} · every ${b.due}${ordinal(b.due)}</div></div>
         <div class="r-amt" style="color:${b.daysLeft<=3?'var(--rust)':'var(--muted)'}">${b.daysLeft}d</div>
       </div>`).join('');
 
@@ -717,7 +718,7 @@ function renderCalendar(){
     : [...DATA.bills].sort((a,b)=>a.due-b.due).map(b => `
       <div class="mini-row">
         ${categoryBadge(b.category,32)}
-        <div class="r-left"><div class="r-title">${b.category}</div><div class="r-sub">${b.frequency} · ${b.paymentMode}</div></div>
+        <div class="r-left"><div class="r-title">${b.category}</div><div class="r-sub">${fmtPHP(b.amount)} · ${b.frequency} · ${b.paymentMode}</div></div>
         <div class="r-amt" style="color:var(--muted);">Day ${b.due}</div>
       </div>`).join('');
 }
@@ -728,9 +729,13 @@ function closeBillModal(){ document.getElementById('billModal').classList.remove
 async function submitBill(){
   const dueEl = document.getElementById('billDue');
   const notesEl = document.getElementById('billNotes');
+  const amountEl = document.getElementById('billAmount');
   const dueVal = parseInt(dueEl.value);
+  const amountVal = parseFloat(amountEl.value);
   dueEl.style.borderColor = 'var(--line)';
   notesEl.style.borderColor = 'var(--line)';
+  amountEl.style.borderColor = 'var(--line)';
+  if(!amountVal || amountVal <= 0){ amountEl.focus(); amountEl.style.borderColor = 'var(--rust)'; return; }
   if(!dueVal || dueVal < 1 || dueVal > 31){ dueEl.style.borderColor = 'var(--rust)'; return; }
   if(!notesEl.value.trim()){ notesEl.focus(); notesEl.style.borderColor = 'var(--rust)'; return; }
   let cat = pickerState.billCategory;
@@ -741,7 +746,7 @@ async function submitBill(){
   const row = {
     user_id: currentUser.id, category: cat, frequency: document.getElementById('billFrequency').value,
     due_day: dueVal, payment_mode: pay, maturity_date: maturityVal ? maturityVal : null,
-    notes: notesEl.value.trim()
+    amount: amountVal, notes: notesEl.value.trim()
   };
   const { error } = await sb.from('bills').insert(row);
   if(error){ console.error(error); notesEl.style.borderColor = 'var(--rust)'; return; }
@@ -749,6 +754,7 @@ async function submitBill(){
   document.getElementById('billCategoryOtherInput').value='';
   document.getElementById('billPaymentOtherInput').value='';
   document.getElementById('billNotes').value='';
+  document.getElementById('billAmount').value='';
   document.getElementById('billDue').value='';
   document.getElementById('billMaturity').value='';
   pickerState.billCategory='Internet'; renderPicker('billCategoryPicker');
@@ -774,7 +780,10 @@ function renderBills(){
     <div class="bill-card">
       <div class="bill-top">
         <div class="bill-top-left">${categoryBadge(b.category,36)}<div class="bill-cat">${b.category}</div></div>
-        <button class="del-btn" onclick="deleteBill('${b.id}')">✕</button>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:15px;color:var(--rust);">${fmtPHP(b.amount)}</div>
+          <button class="del-btn" onclick="deleteBill('${b.id}')">✕</button>
+        </div>
       </div>
       <div class="bill-meta">
         <span class="bill-chip">${b.frequency}</span>
