@@ -322,15 +322,49 @@
   </div>
 
   <div class="view" id="view-bills">
-    <div class="form-header"><div class="back-btn" onclick="goTo('home')">←</div><h2>Bills</h2></div>
+    <div class="form-header"><div class="back-btn" onclick="goTo('home')">←</div><h2>Bills &amp; Debts</h2></div>
     <div style="padding:0 4px;">
-      <div class="stat-grid" id="debtOverview" style="display:none;">
-        <div class="stat-card rust"><div class="s-label">Total Outstanding</div><div class="s-val" id="debtOutstanding">₱0</div></div>
-        <div class="stat-card primary"><div class="s-label">Due Per Cycle</div><div class="s-val" id="debtDuePerCycle">₱0</div></div>
+      <div class="board-tabs">
+        <div class="board-tab active" data-pane="bills" onclick="switchBillsTab('bills')">Bills</div>
+        <div class="board-tab" data-pane="debts" onclick="switchBillsTab('debts')">Debts</div>
       </div>
-      <div id="billsList"></div>
+
+      <div class="board-pane active" id="pane-bills-list">
+        <div id="billsList"></div>
+      </div>
+
+      <div class="board-pane" id="pane-debts-list">
+        <div class="stat-grid" id="debtOverview" style="display:none;grid-template-columns:repeat(3,1fr);gap:8px;">
+          <div class="stat-card rust"><div class="s-label">Total Owed</div><div class="s-val" id="debtTotalOwed" style="font-size:15px;">₱0</div></div>
+          <div class="stat-card primary"><div class="s-label">Monthly</div><div class="s-val" id="debtMonthlyTotal" style="font-size:15px;">₱0</div></div>
+          <div class="stat-card gold"><div class="s-label">Debt-Free</div><div class="s-val" id="debtFreeDate" style="font-size:12px;">—</div></div>
+        </div>
+        <div class="board-tabs" id="strategyToggle" style="display:none;">
+          <div class="board-tab active" data-strategy="avalanche" onclick="setStrategy('avalanche')">Avalanche</div>
+          <div class="board-tab" data-strategy="snowball" onclick="setStrategy('snowball')">Snowball</div>
+        </div>
+        <div id="debtsList"></div>
+      </div>
     </div>
-    <div class="fab" onclick="openBillModal()">+</div>
+    <div class="fab" onclick="openAddModal()">+</div>
+  </div>
+
+  <div class="modal-overlay" id="debtModal">
+    <div class="modal-sheet">
+      <h3>Add Debt</h3>
+      <div class="field"><label>Category</label><div class="chip-grid" id="debtCategoryPicker"></div></div>
+      <div class="field" id="debtCategoryOther" style="display:none;"><label>Specify category</label><input type="text" id="debtCategoryOtherInput" placeholder="Category name"></div>
+      <div class="field"><label>Name</label><input type="text" id="debtName" placeholder="e.g. BPI Credit Card, Car Loan"></div>
+      <div class="field amount-field"><label>Outstanding Balance</label><span class="php-prefix">₱</span><input type="number" id="debtBalance" placeholder="Total amount owed"></div>
+      <div class="field"><label>Interest Rate (% per year, optional)</label><input type="number" id="debtRate" placeholder="e.g. 24" step="0.01"></div>
+      <div class="field amount-field"><label>Monthly Payment</label><span class="php-prefix">₱</span><input type="number" id="debtMonthly" placeholder="What you pay each month"></div>
+      <div class="field"><label>Payment Mode</label><div class="chip-grid" id="debtPaymentPicker"></div></div>
+      <div class="field" id="debtPaymentOther" style="display:none;"><label>Specify wallet</label><input type="text" id="debtPaymentOtherInput" placeholder="Wallet name"></div>
+      <div class="field"><label>Due (day of month, optional)</label><input type="number" id="debtDue" min="1" max="31" placeholder="e.g. 10"></div>
+      <div class="field"><label>Notes</label><textarea id="debtNotes" placeholder="e.g. Account number, purpose of loan"></textarea></div>
+      <button class="submit-btn neutral" onclick="submitDebt()">Save Debt</button>
+      <div style="text-align:center;margin-top:10px;"><span style="font-size:12px;color:var(--muted);cursor:pointer;" onclick="closeDebtModal()">Cancel</span></div>
+    </div>
   </div>
 
   <div class="bottom-nav">
@@ -358,7 +392,6 @@
       <div class="field"><label>Payment Mode</label><div class="chip-grid" id="billPaymentPicker"></div></div>
       <div class="field" id="billPaymentOther" style="display:none;"><label>Specify wallet</label><input type="text" id="billPaymentOtherInput" placeholder="Wallet name"></div>
       <div class="field"><label>Maturity Date (if applicable)</label><input type="date" id="billMaturity"></div>
-      <div class="field amount-field"><label>Outstanding Balance (optional — for loans/credit cards)</label><span class="php-prefix">₱</span><input type="number" id="billOutstanding" placeholder="Total still owed, if applicable"></div>
       <div class="field"><label>Notes</label><textarea id="billNotes" placeholder="e.g. Account name, autopay reminder"></textarea></div>
       <button class="submit-btn neutral" onclick="submitBill()">Save Bill</button>
       <div style="text-align:center;margin-top:10px;"><span style="font-size:12px;color:var(--muted);cursor:pointer;" onclick="closeBillModal()">Cancel</span></div>
@@ -380,7 +413,7 @@ const SUPABASE_URL = 'https://msvhjvrcckhokkbgdiwt.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_-IKwqKifbFnTZjmeWJU8SA_WauYxuXh';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-let DATA = { transactions: [], bills: [] };
+let DATA = { transactions: [], bills: [], debts: [] };
 let calDate = new Date();
 let currentUser = null;
 
@@ -406,6 +439,7 @@ const ICONS = {
   'Credit Card': { bg:'#E9EDF7', color:'#3B4E8C', path:'<rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>' },
   'Insurance': { bg:'#E7F3EC', color:'#1E7A4C', path:'<path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5Z"/>' },
   'Bank Loan': { bg:'#F2ECE0', color:'#8A6D2E', path:'<path d="M3 10 12 4l9 6"/><line x1="4" y1="10" x2="4" y2="19"/><line x1="9" y1="10" x2="9" y2="19"/><line x1="15" y1="10" x2="15" y2="19"/><line x1="20" y1="10" x2="20" y2="19"/><line x1="2" y1="20" x2="22" y2="20"/>' },
+  'Personal Loan': { bg:'#EFE4E9', color:'#8C4B63', path:'<path d="M3 10 12 4l9 6"/><line x1="4" y1="10" x2="4" y2="19"/><line x1="9" y1="10" x2="9" y2="19"/><line x1="15" y1="10" x2="15" y2="19"/><line x1="20" y1="10" x2="20" y2="19"/><line x1="2" y1="20" x2="22" y2="20"/>' },
   'Others': { bg:'#ECECEC', color:'#8A938F', path:'<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>' }
 };
 function iconDef(key){ return ICONS[key] || ICONS['Others']; }
@@ -432,16 +466,19 @@ function incomeBadge(size){
 
 const WALLET_KEYS = ['Cash','BPI','BDO','GoTyme','Maya','GCash','Maribank','Others'];
 const EXPENSE_KEYS = ['Gas','Food','Toll','Grocery','Internet','Electricity','Water','Load','Bills','Debt Payment','Others'];
-const BILLCAT_KEYS = ['Internet','Credit Card','Electricity','Water','Insurance','Bank Loan','Others'];
+const BILLCAT_KEYS = ['Internet','Electricity','Water','Insurance','Others'];
+const DEBTCAT_KEYS = ['Credit Card','Bank Loan','Personal Loan','Others'];
 
 /* picker state */
-const pickerState = { inTo:'Cash', outFrom:'Cash', outFor:'Gas', billCategory:'Internet', billPayment:'Cash' };
+const pickerState = { inTo:'Cash', outFrom:'Cash', outFor:'Gas', billCategory:'Internet', billPayment:'Cash', debtCategory:'Credit Card', debtPayment:'Cash' };
 const pickerConfig = {
   inToPicker:   { keys: WALLET_KEYS,  accent:'var(--gold)',  accentTint:'var(--gold-tint)', stateKey:'inTo',         otherId:'inToOther', shape:'square' },
   outFromPicker:{ keys: WALLET_KEYS,  accent:'var(--rust)',  accentTint:'var(--rust-tint)', stateKey:'outFrom',      otherId:'outFromOther', shape:'square' },
   outForPicker: { keys: EXPENSE_KEYS, accent:'var(--rust)',  accentTint:'var(--rust-tint)', stateKey:'outFor',       otherId:'outForOther', shape:'circle' },
   billCategoryPicker:{ keys: BILLCAT_KEYS, accent:'var(--primary)', accentTint:'var(--primary-tint)', stateKey:'billCategory', otherId:'billCategoryOther', shape:'circle' },
-  billPaymentPicker: { keys: WALLET_KEYS,  accent:'var(--primary)', accentTint:'var(--primary-tint)', stateKey:'billPayment',  otherId:'billPaymentOther', shape:'square' }
+  billPaymentPicker: { keys: WALLET_KEYS,  accent:'var(--primary)', accentTint:'var(--primary-tint)', stateKey:'billPayment',  otherId:'billPaymentOther', shape:'square' },
+  debtCategoryPicker:{ keys: DEBTCAT_KEYS, accent:'var(--rust)', accentTint:'var(--rust-tint)', stateKey:'debtCategory', otherId:'debtCategoryOther', shape:'circle' },
+  debtPaymentPicker: { keys: WALLET_KEYS,  accent:'var(--rust)', accentTint:'var(--rust-tint)', stateKey:'debtPayment',  otherId:'debtPaymentOther', shape:'square' }
 };
 
 function renderPicker(containerId){
@@ -539,18 +576,24 @@ function mapTxFromDB(row){
   };
 }
 function mapBillFromDB(row){
-  return { id: row.id, category: row.category, frequency: row.frequency, due: row.due_day, dueWeekday: row.due_weekday, paymentMode: row.payment_mode, maturity: row.maturity_date, notes: row.notes, amount: Number(row.amount) || 0, outstanding: row.outstanding_balance !== null ? Number(row.outstanding_balance) : null };
+  return { id: row.id, category: row.category, frequency: row.frequency, due: row.due_day, dueWeekday: row.due_weekday, paymentMode: row.payment_mode, maturity: row.maturity_date, notes: row.notes, amount: Number(row.amount) || 0 };
+}
+function mapDebtFromDB(row){
+  return { id: row.id, category: row.category, name: row.name, balance: Number(row.outstanding_balance) || 0, rate: Number(row.interest_rate) || 0, monthly: Number(row.monthly_payment) || 0, paymentMode: row.payment_mode, due: row.due_day, notes: row.notes };
 }
 
 async function loadData(){
-  const [txRes, billRes] = await Promise.all([
+  const [txRes, billRes, debtRes] = await Promise.all([
     sb.from('transactions').select('*').order('created_at', {ascending:false}),
-    sb.from('bills').select('*').order('due_day', {ascending:true})
+    sb.from('bills').select('*').order('due_day', {ascending:true}),
+    sb.from('debts').select('*').order('created_at', {ascending:false})
   ]);
   if(txRes.error) console.error(txRes.error);
   if(billRes.error) console.error(billRes.error);
+  if(debtRes.error) console.error(debtRes.error);
   DATA.transactions = (txRes.data || []).map(mapTxFromDB);
   DATA.bills = (billRes.data || []).map(mapBillFromDB);
+  DATA.debts = (debtRes.data || []).map(mapDebtFromDB);
   renderHome();
 }
 
@@ -566,7 +609,7 @@ function goTo(view){
     }
   });
   if(view==='board') renderBoard();
-  if(view==='bills') renderBills();
+  if(view==='bills'){ renderBills(); if(billsActiveTab === 'debts') renderDebts(); }
   if(view==='home') renderHome();
 }
 
@@ -651,6 +694,63 @@ function computeWalletBalances(){
   return wallets;
 }
 
+/* Walks each wallet forward through everything due in the next 30 days (bills + debt
+   payments together) and flags the exact obligation that would push that wallet negative —
+   not just each bill checked alone against today's balance. */
+function computeShortfalls(){
+  const walletBalances = computeWalletBalances();
+  const today = new Date();
+  const horizon = new Date(today); horizon.setDate(horizon.getDate() + 30);
+
+  let obligations = [];
+  DATA.bills.forEach(b => {
+    const due = nextDueDate(b, today);
+    if(due <= horizon) obligations.push({ id: 'bill-'+b.id, wallet: b.paymentMode, amount: b.amount, due });
+  });
+  DATA.debts.forEach(d => {
+    if(d.due){
+      const due = nextDueDate({ due: d.due, dueWeekday: null }, today);
+      if(due <= horizon) obligations.push({ id: 'debt-'+d.id, wallet: d.paymentMode, amount: d.monthly, due });
+    }
+  });
+
+  const byWallet = {};
+  obligations.forEach(o => { (byWallet[o.wallet] = byWallet[o.wallet] || []).push(o); });
+
+  const shortfalls = {};
+  Object.values(byWallet).forEach(list => {
+    list.sort((a,b) => a.due - b.due);
+    let running = walletBalances[list[0].wallet] || 0;
+    list.forEach(o => {
+      running -= o.amount;
+      if(running < 0) shortfalls[o.id] = -running;
+    });
+  });
+  return shortfalls;
+}
+
+/* Standard amortization payoff: given a balance, a fixed monthly payment, and an annual
+   interest rate, how many months until it's paid off and how much interest total. */
+function computePayoff(balance, monthly, annualRatePct){
+  if(!monthly || monthly <= 0 || !balance || balance <= 0) return null;
+  const r = (annualRatePct || 0) / 100 / 12;
+  if(r === 0){
+    const months = Math.ceil(balance / monthly);
+    return { months, totalInterest: 0, neverPaysOff: false };
+  }
+  if(monthly <= balance * r){
+    return { months: null, totalInterest: null, neverPaysOff: true, minMonthly: balance * r };
+  }
+  const months = Math.ceil(-Math.log(1 - (balance * r) / monthly) / Math.log(1 + r));
+  const totalInterest = (months * monthly) - balance;
+  return { months, totalInterest, neverPaysOff: false };
+}
+function addMonths(date, months){
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
+  return d;
+}
+
 function renderHome(){
   const totalIn = DATA.transactions.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
   const totalOut = DATA.transactions.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
@@ -665,11 +765,13 @@ function renderHome(){
 
   const dueList = document.getElementById('dueSoonList');
   const today = new Date();
-  const walletBalances = computeWalletBalances();
-  const upcoming = DATA.bills.map(b => {
-    const due = nextDueDate(b, today);
-    const walletBal = walletBalances[b.paymentMode] || 0;
-    return {...b, daysLeft: Math.ceil((due - today) / 86400000), shortBy: b.amount - walletBal};
+  const shortfalls = computeShortfalls();
+  const upcoming = [
+    ...DATA.bills.map(b => ({...b, kind:'bill', dueDate: nextDueDate(b, today)})),
+    ...DATA.debts.filter(d => d.due).map(d => ({...d, kind:'debt', amount: d.monthly, dueDate: nextDueDate({due:d.due, dueWeekday:null}, today)}))
+  ].map(item => {
+    const shortKey = (item.kind === 'bill' ? 'bill-' : 'debt-') + item.id;
+    return {...item, daysLeft: Math.ceil((item.dueDate - today) / 86400000), shortBy: shortfalls[shortKey] || 0};
   }).sort((a,b)=>a.daysLeft-b.daysLeft).slice(0,3);
 
   dueList.innerHTML = upcoming.length === 0
@@ -806,13 +908,12 @@ async function submitBill(){
   let pay = pickerState.billPayment;
   if(pay === 'Others') pay = document.getElementById('billPaymentOtherInput').value.trim() || 'Others';
   const maturityVal = document.getElementById('billMaturity').value;
-  const outstandingVal = parseFloat(document.getElementById('billOutstanding').value);
   const row = {
     user_id: currentUser.id, category: cat, frequency: freq,
     due_day: isWeeklyType ? null : dueVal,
     due_weekday: isWeeklyType ? billWeekday : null,
     payment_mode: pay, maturity_date: maturityVal ? maturityVal : null,
-    amount: amountVal, outstanding_balance: outstandingVal > 0 ? outstandingVal : null, notes: notesEl.value.trim()
+    amount: amountVal, notes: notesEl.value.trim()
   };
   const { error } = await sb.from('bills').insert(row);
   if(error){ console.error(error); notesEl.style.borderColor = 'var(--rust)'; return; }
@@ -823,7 +924,6 @@ async function submitBill(){
   document.getElementById('billAmount').value='';
   document.getElementById('billDue').value='';
   document.getElementById('billMaturity').value='';
-  document.getElementById('billOutstanding').value='';
   document.getElementById('billFrequency').value = 'Monthly';
   onFrequencyChange();
   billWeekday = 1; renderWeekdayPicker();
@@ -840,28 +940,159 @@ async function deleteBill(id){
   renderBills();
 }
 
+/* ---------- BILLS/DEBTS TAB SWITCHING ---------- */
+let billsActiveTab = 'bills';
+function switchBillsTab(tab){
+  billsActiveTab = tab;
+  document.querySelectorAll('#view-bills .board-tabs')[0].querySelectorAll('.board-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === tab));
+  document.getElementById('pane-bills-list').classList.toggle('active', tab === 'bills');
+  document.getElementById('pane-debts-list').classList.toggle('active', tab === 'debts');
+  if(tab === 'debts') renderDebts();
+}
+function openAddModal(){
+  if(billsActiveTab === 'debts') openDebtModal(); else openBillModal();
+}
+
+/* ---------- DEBTS ---------- */
+function openDebtModal(){ document.getElementById('debtModal').classList.add('active'); }
+function closeDebtModal(){ document.getElementById('debtModal').classList.remove('active'); }
+
+async function submitDebt(){
+  const nameEl = document.getElementById('debtName');
+  const balanceEl = document.getElementById('debtBalance');
+  const monthlyEl = document.getElementById('debtMonthly');
+  const notesEl = document.getElementById('debtNotes');
+  [nameEl, balanceEl, monthlyEl, notesEl].forEach(el => el.style.borderColor = 'var(--line)');
+
+  if(!nameEl.value.trim()){ nameEl.focus(); nameEl.style.borderColor = 'var(--rust)'; return; }
+  const balanceVal = parseFloat(balanceEl.value);
+  if(!balanceVal || balanceVal <= 0){ balanceEl.focus(); balanceEl.style.borderColor = 'var(--rust)'; return; }
+  const monthlyVal = parseFloat(monthlyEl.value);
+  if(!monthlyVal || monthlyVal <= 0){ monthlyEl.focus(); monthlyEl.style.borderColor = 'var(--rust)'; return; }
+  if(!notesEl.value.trim()){ notesEl.focus(); notesEl.style.borderColor = 'var(--rust)'; return; }
+
+  let cat = pickerState.debtCategory;
+  if(cat === 'Others') cat = document.getElementById('debtCategoryOtherInput').value.trim() || 'Others';
+  let pay = pickerState.debtPayment;
+  if(pay === 'Others') pay = document.getElementById('debtPaymentOtherInput').value.trim() || 'Others';
+  const rateVal = parseFloat(document.getElementById('debtRate').value) || 0;
+  const dueVal = parseInt(document.getElementById('debtDue').value) || null;
+
+  const row = {
+    user_id: currentUser.id, category: cat, name: nameEl.value.trim(),
+    outstanding_balance: balanceVal, interest_rate: rateVal, monthly_payment: monthlyVal,
+    payment_mode: pay, due_day: dueVal, notes: notesEl.value.trim()
+  };
+  const { error } = await sb.from('debts').insert(row);
+  if(error){ console.error(error); notesEl.style.borderColor = 'var(--rust)'; return; }
+
+  closeDebtModal();
+  nameEl.value = ''; balanceEl.value = ''; monthlyEl.value = ''; notesEl.value = '';
+  document.getElementById('debtRate').value = '';
+  document.getElementById('debtDue').value = '';
+  document.getElementById('debtCategoryOtherInput').value = '';
+  document.getElementById('debtPaymentOtherInput').value = '';
+  pickerState.debtCategory = 'Credit Card'; renderPicker('debtCategoryPicker');
+  pickerState.debtPayment = 'Cash'; renderPicker('debtPaymentPicker');
+  await loadData();
+  renderDebts();
+}
+
+async function deleteDebt(id){
+  const { error } = await sb.from('debts').delete().eq('id', id);
+  if(error){ console.error(error); return; }
+  await loadData();
+  renderDebts();
+}
+
+let debtStrategy = 'avalanche';
+function setStrategy(strategy){
+  debtStrategy = strategy;
+  document.getElementById('strategyToggle').querySelectorAll('.board-tab').forEach(t => t.classList.toggle('active', t.dataset.strategy === strategy));
+  renderDebts();
+}
+
+function renderDebts(){
+  const overviewEl = document.getElementById('debtOverview');
+  const strategyEl = document.getElementById('strategyToggle');
+  const listEl = document.getElementById('debtsList');
+
+  if(DATA.debts.length === 0){
+    overviewEl.style.display = 'none';
+    strategyEl.style.display = 'none';
+    listEl.innerHTML = '<div class="empty-state"><div class="e-title">No debts logged</div>Tap + to add a loan or credit card to track its payoff.</div>';
+    return;
+  }
+
+  const debts = DATA.debts.map(d => ({...d, payoff: computePayoff(d.balance, d.monthly, d.rate)}));
+  const totalOwed = debts.reduce((s,d)=>s+d.balance,0);
+  const totalMonthly = debts.reduce((s,d)=>s+d.monthly,0);
+  const stuck = debts.filter(d => d.payoff && d.payoff.neverPaysOff);
+  const resolvable = debts.filter(d => d.payoff && !d.payoff.neverPaysOff);
+  const overallMonths = resolvable.length ? Math.max(...resolvable.map(d=>d.payoff.months)) : null;
+
+  overviewEl.style.display = 'grid';
+  strategyEl.style.display = 'flex';
+  document.getElementById('debtTotalOwed').textContent = fmtPHP(totalOwed);
+  document.getElementById('debtMonthlyTotal').textContent = fmtPHP(totalMonthly);
+  document.getElementById('debtFreeDate').textContent = stuck.length
+    ? '⚠ Check payments'
+    : (overallMonths !== null ? addMonths(new Date(), overallMonths).toLocaleDateString('en-PH',{month:'short',year:'numeric'}) : '—');
+
+  const ranked = [...debts].sort((a,b) => debtStrategy === 'avalanche'
+    ? (b.rate - a.rate) || (a.balance - b.balance)
+    : (a.balance - b.balance) || (b.rate - a.rate)
+  );
+
+  const shortfalls = computeShortfalls();
+
+  listEl.innerHTML = ranked.map((d, idx) => {
+    const shortBy = shortfalls['debt-'+d.id] || 0;
+    const payoffText = d.payoff
+      ? (d.payoff.neverPaysOff
+          ? `⚠ Payment too low — needs at least ${fmtPHP(d.payoff.minMonthly)}/mo just to cover interest`
+          : `Debt-free in ${d.payoff.months}mo (${addMonths(new Date(), d.payoff.months).toLocaleDateString('en-PH',{month:'short',year:'numeric'})}) · ${fmtPHP(d.payoff.totalInterest)} interest total`)
+      : '';
+    return `
+    <div class="bill-card">
+      <div class="bill-top">
+        <div class="bill-top-left">
+          ${categoryBadge(d.category,36)}
+          <div>
+            <div class="bill-cat">${d.name}</div>
+            ${idx === 0 ? `<div style="font-size:10px;font-weight:700;color:var(--rust);text-transform:uppercase;letter-spacing:0.04em;">Focus here first</div>` : ''}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:15px;color:var(--rust);">${fmtPHP(d.balance)}</div>
+          <button class="del-btn" onclick="deleteDebt('${d.id}')">✕</button>
+        </div>
+      </div>
+      <div class="bill-meta">
+        <span class="bill-chip">${fmtPHP(d.monthly)}/mo</span>
+        ${d.rate > 0 ? `<span class="bill-chip">${d.rate}% APR</span>` : ''}
+        <span class="bill-chip" style="display:flex;align-items:center;gap:5px;padding-left:4px;">${walletBadge(d.paymentMode,16)}${d.paymentMode}</span>
+        ${d.due ? `<span class="bill-chip">Due day ${d.due}</span>` : ''}
+      </div>
+      ${payoffText ? `<div class="bill-notes" style="margin-top:8px;color:${d.payoff.neverPaysOff?'var(--rust)':'var(--ink-soft)'};font-weight:${d.payoff.neverPaysOff?'700':'400'};">${payoffText}</div>` : ''}
+      ${shortBy > 0 ? `<div class="bill-notes" style="color:var(--rust);font-weight:700;margin-top:6px;">⚠ Short by ${fmtPHP(shortBy)} in ${d.paymentMode} to cover this</div>` : ''}
+      ${d.notes ? `<div class="bill-notes">${d.notes}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
 function renderBills(){
   const el = document.getElementById('billsList');
-  const overviewEl = document.getElementById('debtOverview');
 
   if(DATA.bills.length === 0){
-    overviewEl.style.display = 'none';
     el.innerHTML = '<div class="empty-state"><div class="e-title">No ongoing bills</div>Tap + to add your first recurring bill.</div>';
     return;
   }
 
-  const withOutstanding = DATA.bills.filter(b => b.outstanding !== null && b.outstanding !== undefined);
-  const totalOutstanding = withOutstanding.reduce((s,b)=>s+b.outstanding,0);
-  const totalPerCycle = DATA.bills.reduce((s,b)=>s+b.amount,0);
-  overviewEl.style.display = 'grid';
-  document.getElementById('debtOutstanding').textContent = withOutstanding.length ? fmtPHP(totalOutstanding) : '—';
-  document.getElementById('debtDuePerCycle').textContent = fmtPHP(totalPerCycle);
+  const shortfalls = computeShortfalls();
 
-  const walletBalances = computeWalletBalances();
-
-  el.innerHTML = [...DATA.bills].sort((a,b)=>a.due-b.due).map(b => {
-    const walletBal = walletBalances[b.paymentMode] || 0;
-    const shortBy = b.amount - walletBal;
+  el.innerHTML = [...DATA.bills].sort((a,b)=> (a.dueWeekday ?? 99) - (b.dueWeekday ?? 99) || (a.due||0) - (b.due||0)).map(b => {
+    const shortBy = shortfalls['bill-'+b.id] || 0;
     return `
     <div class="bill-card">
       <div class="bill-top">
@@ -876,7 +1107,6 @@ function renderBills(){
         <span class="bill-chip">${dueLabelLong(b)}</span>
         <span class="bill-chip" style="display:flex;align-items:center;gap:5px;padding-left:4px;">${walletBadge(b.paymentMode,16)}${b.paymentMode}</span>
         ${b.maturity ? `<span class="bill-chip">Until ${new Date(b.maturity).toLocaleDateString('en-PH',{month:'short',year:'numeric'})}</span>` : ''}
-        ${b.outstanding !== null && b.outstanding !== undefined ? `<span class="bill-chip" style="background:var(--rust-tint);color:var(--rust);">Owed: ${fmtPHP(b.outstanding)}</span>` : ''}
       </div>
       ${shortBy > 0 ? `<div class="bill-notes" style="color:var(--rust);font-weight:700;margin-top:8px;">⚠ Short by ${fmtPHP(shortBy)} in ${b.paymentMode} to cover this</div>` : ''}
       ${b.notes ? `<div class="bill-notes">${b.notes}</div>` : ''}
