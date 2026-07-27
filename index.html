@@ -103,6 +103,8 @@
   .chip.selected{border-color:var(--accent,var(--primary));box-shadow:0 0 0 3px var(--accent-tint,var(--primary-tint));}
   .chip .chip-label{font-size:10px;font-weight:600;color:var(--ink-soft);text-align:center;line-height:1.2;}
   .chip.selected .chip-label{color:var(--ink);}
+  #billWeekdayPicker .chip{padding:16px 4px;}
+  #billWeekdayPicker .chip-label{font-size:12px;}
 
   .submit-btn{width:100%;padding:15px;border:none;border-radius:14px;font-size:15px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;color:#fff;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:8px;}
   .submit-btn.in{background:var(--gold);}
@@ -347,11 +349,12 @@
       <div class="field amount-field"><label>Amount</label><span class="php-prefix">₱</span><input type="number" id="billAmount" placeholder="0.00" inputmode="decimal"></div>
       <div class="field">
         <label>Frequency</label>
-        <select id="billFrequency" style="width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-size:15px;">
+        <select id="billFrequency" onchange="onFrequencyChange()" style="width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-size:15px;">
           <option>Weekly</option><option>Bi-weekly</option><option selected>Monthly</option><option>Quarterly</option><option>Annually</option>
         </select>
       </div>
-      <div class="field"><label>Due (day of month, 1–31)</label><input type="number" id="billDue" min="1" max="31" placeholder="e.g. 15"></div>
+      <div class="field" id="dueDayField"><label>Due (day of month, 1–31)</label><input type="number" id="billDue" min="1" max="31" placeholder="e.g. 15"></div>
+      <div class="field" id="dueWeekdayField" style="display:none;"><label>Due (day of week)</label><div class="chip-grid" id="billWeekdayPicker" style="grid-template-columns:repeat(4,1fr);"></div></div>
       <div class="field"><label>Payment Mode</label><div class="chip-grid" id="billPaymentPicker"></div></div>
       <div class="field" id="billPaymentOther" style="display:none;"><label>Specify wallet</label><input type="text" id="billPaymentOtherInput" placeholder="Wallet name"></div>
       <div class="field"><label>Maturity Date (if applicable)</label><input type="date" id="billMaturity"></div>
@@ -460,7 +463,46 @@ function renderPicker(containerId){
     });
   });
 }
-function initPickers(){ Object.keys(pickerConfig).forEach(renderPicker); }
+function initPickers(){ Object.keys(pickerConfig).forEach(renderPicker); renderWeekdayPicker(); }
+
+/* weekday picker for Weekly/Bi-weekly bills */
+const WEEKDAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+let billWeekday = 1; // default Monday
+
+function renderWeekdayPicker(){
+  const el = document.getElementById('billWeekdayPicker');
+  el.innerHTML = WEEKDAY_NAMES.map((name, i) => `
+    <div class="chip ${i===billWeekday?'selected':''}" data-value="${i}" style="--accent:var(--primary);--accent-tint:var(--primary-tint);">
+      <div class="chip-label">${name.slice(0,3)}</div>
+    </div>
+  `).join('');
+  el.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => { billWeekday = parseInt(chip.dataset.value); renderWeekdayPicker(); });
+  });
+}
+
+function onFrequencyChange(){
+  const freq = document.getElementById('billFrequency').value;
+  const isWeeklyType = (freq === 'Weekly' || freq === 'Bi-weekly');
+  document.getElementById('dueDayField').style.display = isWeeklyType ? 'none' : 'block';
+  document.getElementById('dueWeekdayField').style.display = isWeeklyType ? 'block' : 'none';
+}
+
+function weekdayName(i){ return WEEKDAY_NAMES[i]; }
+function dueLabelLong(b){ return (b.dueWeekday !== null && b.dueWeekday !== undefined) ? `every ${weekdayName(b.dueWeekday)}` : `every ${b.due}${ordinal(b.due)}`; }
+function dueLabelShort(b){ return (b.dueWeekday !== null && b.dueWeekday !== undefined) ? weekdayName(b.dueWeekday).slice(0,3) : `Day ${b.due}`; }
+
+function nextDueDate(bill, today){
+  if(bill.dueWeekday !== null && bill.dueWeekday !== undefined){
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const diff = (bill.dueWeekday - d.getDay() + 7) % 7;
+    d.setDate(d.getDate() + diff);
+    return d;
+  }
+  let due = new Date(today.getFullYear(), today.getMonth(), bill.due);
+  if(due < today) due = new Date(today.getFullYear(), today.getMonth()+1, bill.due);
+  return due;
+}
 
 /* ---------- LOGO MARK ---------- */
 function renderLogo(){
@@ -497,7 +539,7 @@ function mapTxFromDB(row){
   };
 }
 function mapBillFromDB(row){
-  return { id: row.id, category: row.category, frequency: row.frequency, due: row.due_day, paymentMode: row.payment_mode, maturity: row.maturity_date, notes: row.notes, amount: Number(row.amount) || 0, outstanding: row.outstanding_balance !== null ? Number(row.outstanding_balance) : null };
+  return { id: row.id, category: row.category, frequency: row.frequency, due: row.due_day, dueWeekday: row.due_weekday, paymentMode: row.payment_mode, maturity: row.maturity_date, notes: row.notes, amount: Number(row.amount) || 0, outstanding: row.outstanding_balance !== null ? Number(row.outstanding_balance) : null };
 }
 
 async function loadData(){
@@ -625,8 +667,7 @@ function renderHome(){
   const today = new Date();
   const walletBalances = computeWalletBalances();
   const upcoming = DATA.bills.map(b => {
-    let due = new Date(today.getFullYear(), today.getMonth(), b.due);
-    if(due < today) due = new Date(today.getFullYear(), today.getMonth()+1, b.due);
+    const due = nextDueDate(b, today);
     const walletBal = walletBalances[b.paymentMode] || 0;
     return {...b, daysLeft: Math.ceil((due - today) / 86400000), shortBy: b.amount - walletBal};
   }).sort((a,b)=>a.daysLeft-b.daysLeft).slice(0,3);
@@ -638,7 +679,7 @@ function renderHome(){
         ${categoryBadge(b.category,32)}
         <div class="r-left">
           <div class="r-title">${b.category}</div>
-          <div class="r-sub">${fmtPHP(b.amount)} · ${b.paymentMode} · every ${b.due}${ordinal(b.due)}</div>
+          <div class="r-sub">${fmtPHP(b.amount)} · ${b.paymentMode} · ${dueLabelLong(b)}</div>
           ${b.shortBy > 0 ? `<div class="r-sub" style="color:var(--rust);font-weight:700;">⚠ Short by ${fmtPHP(b.shortBy)} in ${b.paymentMode}</div>` : ''}
         </div>
         <div class="r-amt" style="color:${b.daysLeft<=3?'var(--rust)':'var(--muted)'}">${b.daysLeft}d</div>
@@ -722,22 +763,24 @@ function renderCalendar(){
   document.getElementById('calMonthLabel').textContent = calDate.toLocaleDateString('en-PH',{month:'long',year:'numeric'});
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month+1, 0).getDate();
-  const dueDays = new Set(DATA.bills.map(b => b.due));
+  const monthlyDueDays = new Set(DATA.bills.filter(b => b.dueWeekday === null || b.dueWeekday === undefined).map(b => b.due));
+  const weekdayDues = new Set(DATA.bills.filter(b => b.dueWeekday !== null && b.dueWeekday !== undefined).map(b => b.dueWeekday));
   let html = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="cal-dow">${d}</div>`).join('');
   for(let i=0;i<firstDay;i++) html += '<div class="cal-cell empty"></div>';
   for(let d=1; d<=daysInMonth; d++){
-    const hasBill = dueDays.has(d);
+    const weekday = new Date(year, month, d).getDay();
+    const hasBill = monthlyDueDays.has(d) || weekdayDues.has(weekday);
     html += `<div class="cal-cell ${hasBill?'has-bill':''}">${d}${hasBill?'<div class="dot"></div>':''}</div>`;
   }
   document.getElementById('calGrid').innerHTML = html;
   const listEl = document.getElementById('calBillList');
   listEl.innerHTML = DATA.bills.length === 0
     ? '<div class="empty-state">No bills added yet.</div>'
-    : [...DATA.bills].sort((a,b)=>a.due-b.due).map(b => `
+    : [...DATA.bills].sort((a,b)=> (a.dueWeekday ?? 99) - (b.dueWeekday ?? 99) || (a.due||0) - (b.due||0)).map(b => `
       <div class="mini-row">
         ${categoryBadge(b.category,32)}
         <div class="r-left"><div class="r-title">${b.category}</div><div class="r-sub">${fmtPHP(b.amount)} · ${b.frequency} · ${b.paymentMode}</div></div>
-        <div class="r-amt" style="color:var(--muted);">Day ${b.due}</div>
+        <div class="r-amt" style="color:var(--muted);">${dueLabelShort(b)}</div>
       </div>`).join('');
 }
 
@@ -748,13 +791,15 @@ async function submitBill(){
   const dueEl = document.getElementById('billDue');
   const notesEl = document.getElementById('billNotes');
   const amountEl = document.getElementById('billAmount');
+  const freq = document.getElementById('billFrequency').value;
+  const isWeeklyType = (freq === 'Weekly' || freq === 'Bi-weekly');
   const dueVal = parseInt(dueEl.value);
   const amountVal = parseFloat(amountEl.value);
   dueEl.style.borderColor = 'var(--line)';
   notesEl.style.borderColor = 'var(--line)';
   amountEl.style.borderColor = 'var(--line)';
   if(!amountVal || amountVal <= 0){ amountEl.focus(); amountEl.style.borderColor = 'var(--rust)'; return; }
-  if(!dueVal || dueVal < 1 || dueVal > 31){ dueEl.style.borderColor = 'var(--rust)'; return; }
+  if(!isWeeklyType && (!dueVal || dueVal < 1 || dueVal > 31)){ dueEl.style.borderColor = 'var(--rust)'; return; }
   if(!notesEl.value.trim()){ notesEl.focus(); notesEl.style.borderColor = 'var(--rust)'; return; }
   let cat = pickerState.billCategory;
   if(cat === 'Others') cat = document.getElementById('billCategoryOtherInput').value.trim() || 'Others';
@@ -763,8 +808,10 @@ async function submitBill(){
   const maturityVal = document.getElementById('billMaturity').value;
   const outstandingVal = parseFloat(document.getElementById('billOutstanding').value);
   const row = {
-    user_id: currentUser.id, category: cat, frequency: document.getElementById('billFrequency').value,
-    due_day: dueVal, payment_mode: pay, maturity_date: maturityVal ? maturityVal : null,
+    user_id: currentUser.id, category: cat, frequency: freq,
+    due_day: isWeeklyType ? null : dueVal,
+    due_weekday: isWeeklyType ? billWeekday : null,
+    payment_mode: pay, maturity_date: maturityVal ? maturityVal : null,
     amount: amountVal, outstanding_balance: outstandingVal > 0 ? outstandingVal : null, notes: notesEl.value.trim()
   };
   const { error } = await sb.from('bills').insert(row);
@@ -777,6 +824,9 @@ async function submitBill(){
   document.getElementById('billDue').value='';
   document.getElementById('billMaturity').value='';
   document.getElementById('billOutstanding').value='';
+  document.getElementById('billFrequency').value = 'Monthly';
+  onFrequencyChange();
+  billWeekday = 1; renderWeekdayPicker();
   pickerState.billCategory='Internet'; renderPicker('billCategoryPicker');
   pickerState.billPayment='Cash'; renderPicker('billPaymentPicker');
   await loadData();
@@ -823,7 +873,7 @@ function renderBills(){
       </div>
       <div class="bill-meta">
         <span class="bill-chip">${b.frequency}</span>
-        <span class="bill-chip">Due day ${b.due}</span>
+        <span class="bill-chip">${dueLabelLong(b)}</span>
         <span class="bill-chip" style="display:flex;align-items:center;gap:5px;padding-left:4px;">${walletBadge(b.paymentMode,16)}${b.paymentMode}</span>
         ${b.maturity ? `<span class="bill-chip">Until ${new Date(b.maturity).toLocaleDateString('en-PH',{month:'short',year:'numeric'})}</span>` : ''}
         ${b.outstanding !== null && b.outstanding !== undefined ? `<span class="bill-chip" style="background:var(--rust-tint);color:var(--rust);">Owed: ${fmtPHP(b.outstanding)}</span>` : ''}
